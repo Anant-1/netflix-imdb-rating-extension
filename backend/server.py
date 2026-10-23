@@ -19,7 +19,10 @@ from pathlib import Path
 
 # Paths & Settings
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "ratings_cache.db"
+DB_PATH = Path(os.environ.get(
+    "RATINGS_DB_PATH",
+    "/tmp/ratings_cache.db" if os.environ.get("VERCEL") else BASE_DIR / "ratings_cache.db",
+))
 CONFIG_PATH = BASE_DIR / "config.json"
 HOST = "127.0.0.1"
 PORT = 5000
