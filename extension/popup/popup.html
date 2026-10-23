@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Netflix IMDb Ratings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo-group">
+      <span class="imdb-badge">IMDb</span>
+      <h3>Netflix Hover Ratings</h3>
+    </div>
+  </div>
+
+  <div class="status-card">
+    <div class="status-indicator">
+      <span id="status-dot" class="dot checking"></span>
+      <span id="status-text">Checking Python backend...</span>
+    </div>
+    <div id="status-subtext" class="status-sub">http://127.0.0.1:5000</div>
+  </div>
+
+  <div class="section">
+    <label for="test-input">Test Movie Search</label>
+    <div class="search-box">
+      <input type="text" id="test-input" placeholder="e.g. Stranger Things, Interstellar" />
+      <button id="test-btn">Search</button>
+    </div>
+    <div id="test-result" class="test-result hidden"></div>
+  </div>
+
+  <div class="actions">
+    <button id="clear-cache-btn" class="btn-secondary">Clear Cache</button>
+    <a href="https://github.com" id="help-btn" target="_blank" class="btn-secondary">Instructions</a>
+  </div>
+
+  <div class="footer">
+    <span>Backend: <code>python3 backend/server.py</code></span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
