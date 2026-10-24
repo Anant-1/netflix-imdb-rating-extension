@@ -68,7 +68,7 @@ async function fetchRatingFromPython(title) {
     const isOffline = err.name === "AbortError" || err.message?.includes("Failed to fetch");
     return {
       success: false,
-      error: isOffline ? "Python backend offline" : err.message,
+      error: isOffline ? "Rating service unavailable" : err.message,
       isOffline: true
     };
   }
