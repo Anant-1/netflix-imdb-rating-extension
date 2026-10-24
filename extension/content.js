@@ -14,6 +14,37 @@
   let activeCard = null;
   let floatingTooltip = null;
 
+  function isExtensionContextInvalidated(error) {
+    return /extension context invalidated/i.test(error?.message || String(error));
+  }
+
+  // A Netflix tab can outlive an extension reload. In that case Chrome invalidates
+  // the old content script context and sendMessage throws instead of reaching the worker.
+  function sendExtensionMessage(message, callback) {
+    try {
+      if (!chrome?.runtime?.id) return false;
+
+      chrome.runtime.sendMessage(message, (response) => {
+        try {
+          const runtimeError = chrome.runtime.lastError;
+          if (runtimeError) {
+            callback(undefined, runtimeError);
+            return;
+          }
+        } catch (error) {
+          if (isExtensionContextInvalidated(error)) return;
+          throw error;
+        }
+
+        callback(response, null);
+      });
+      return true;
+    } catch (error) {
+      if (isExtensionContextInvalidated(error)) return false;
+      throw error;
+    }
+  }
+
   // --- Initialize Floating Tooltip Element ---
   function getOrCreateTooltip() {
     let tooltip = document.getElementById(TOOLTIP_ID);
@@ -85,50 +116,57 @@
 
     card.appendChild(badge);
 
-    // Request rating from background worker
-    chrome.runtime.sendMessage({ action: "GET_RATING", title: title }, (response) => {
-      if (!badge.isConnected) return;
+    const messageSent = sendExtensionMessage(
+      { action: "GET_RATING", title: title },
+      (response, error) => {
+        if (!badge.isConnected) return;
+        if (error) {
+          badge.remove();
+          return;
+        }
 
-      badge.classList.remove("netflix-imdb-badge-loading");
+        badge.classList.remove("netflix-imdb-badge-loading");
 
-      if (response && response.success && response.data) {
-        const item = response.data;
-        const isRated = item.rating && item.rating !== "N/A";
-        const scoreText = isRated ? `★ ${item.rating}` : "Unrated";
-        badge.innerHTML = `
-          <span class="imdb-icon">IMDb</span>
-          <span class="imdb-score">${scoreText}</span>
-        `;
-        badge.dataset.title = item.title || title;
-        badge.dataset.rating = item.rating || "N/A";
-        badge.dataset.votes = item.votes || "";
-        badge.dataset.year = item.year || "";
-        badge.dataset.genre = item.genre || "";
-        badge.dataset.plot = item.plot || "";
-        badge.dataset.imdbId = item.imdb_id || "";
+        if (response && response.success && response.data) {
+          const item = response.data;
+          const isRated = item.rating && item.rating !== "N/A";
+          const scoreText = isRated ? `★ ${item.rating}` : "Unrated";
+          badge.innerHTML = `
+            <span class="imdb-icon">IMDb</span>
+            <span class="imdb-score">${scoreText}</span>
+          `;
+          badge.dataset.title = item.title || title;
+          badge.dataset.rating = item.rating || "N/A";
+          badge.dataset.votes = item.votes || "";
+          badge.dataset.year = item.year || "";
+          badge.dataset.genre = item.genre || "";
+          badge.dataset.plot = item.plot || "";
+          badge.dataset.imdbId = item.imdb_id || "";
 
-        // Event listener to show rich tooltip on badge hover
-        badge.addEventListener("mouseenter", (e) => {
-          showTooltip(badge, e);
-        });
-        badge.addEventListener("mouseleave", () => {
-          hideTooltip();
-        });
-      } else if (response && response.isOffline) {
-        badge.classList.add("netflix-imdb-offline");
-        badge.title = "Python server offline. Run: python3 server.py";
-        badge.innerHTML = `
-          <span class="imdb-icon">IMDb</span>
-          <span class="imdb-score">Offline ⚠️</span>
-        `;
-      } else {
-        badge.classList.add("netflix-imdb-notfound");
-        badge.innerHTML = `
-          <span class="imdb-icon">IMDb</span>
-          <span class="imdb-score">N/A</span>
-        `;
+          badge.addEventListener("mouseenter", (event) => {
+            showTooltip(badge, event);
+          });
+          badge.addEventListener("mouseleave", () => {
+            hideTooltip();
+          });
+        } else if (response && response.isOffline) {
+          badge.classList.add("netflix-imdb-offline");
+          badge.title = "Rating service unavailable";
+          badge.innerHTML = `
+            <span class="imdb-icon">IMDb</span>
+            <span class="imdb-score">Offline ⚠️</span>
+          `;
+        } else {
+          badge.classList.add("netflix-imdb-notfound");
+          badge.innerHTML = `
+            <span class="imdb-icon">IMDb</span>
+            <span class="imdb-score">N/A</span>
+          `;
+        }
       }
-    });
+    );
+
+    if (!messageSent) badge.remove();
   }
 
   // --- Floating Tooltip Display ---
@@ -211,7 +249,6 @@
     const title = extractTitleFromElement(modal);
     if (!title) return;
 
-    // Target the metadata row in preview modal (where match %, year, rating icons are)
     const metaContainer = modal.querySelector(".previewModal--detailsMetadata-left, .videoMetadata--container");
     if (!metaContainer) return;
 
@@ -223,22 +260,34 @@
     `;
     metaContainer.prepend(modalBadge);
 
-    chrome.runtime.sendMessage({ action: "GET_RATING", title: title }, (response) => {
-      if (!modalBadge.isConnected) return;
-      if (response && response.success && response.data) {
-        const item = response.data;
-        const url = item.imdb_id ? `https://www.imdb.com/title/${item.imdb_id}/` : `https://www.imdb.com/find?q=${encodeURIComponent(item.title)}`;
-        modalBadge.innerHTML = `
-          <a href="${url}" target="_blank" rel="noopener noreferrer" class="imdb-modal-link">
-            <span class="imdb-icon">IMDb</span>
-            <span class="imdb-score">★ ${item.rating}/10</span>
-            ${item.votes && item.votes !== "N/A" ? `<span class="imdb-votes">(${item.votes})</span>` : ""}
-          </a>
-        `;
-      } else {
-        modalBadge.style.display = "none";
+    const messageSent = sendExtensionMessage(
+      { action: "GET_RATING", title: title },
+      (response, error) => {
+        if (!modalBadge.isConnected) return;
+        if (error) {
+          modalBadge.remove();
+          return;
+        }
+
+        if (response && response.success && response.data) {
+          const item = response.data;
+          const url = item.imdb_id
+            ? `https://www.imdb.com/title/${item.imdb_id}/`
+            : `https://www.imdb.com/find?q=${encodeURIComponent(item.title)}`;
+          modalBadge.innerHTML = `
+            <a href="${url}" target="_blank" rel="noopener noreferrer" class="imdb-modal-link">
+              <span class="imdb-icon">IMDb</span>
+              <span class="imdb-score">★ ${item.rating}/10</span>
+              ${item.votes && item.votes !== "N/A" ? `<span class="imdb-votes">(${item.votes})</span>` : ""}
+            </a>
+          `;
+        } else {
+          modalBadge.style.display = "none";
+        }
       }
-    });
+    );
+
+    if (!messageSent) modalBadge.remove();
   }
 
   // --- Mouseover / Hover Delegated Listener ---

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Netflix IMDb Rating Backend Server
-Zero external dependencies required (uses standard library http.server, urllib, sqlite3).
+Zero external dependencies required (uses standard library http.server and urllib).
 Optionally supports OMDB_API_KEY if configured in environment or .env file.
 """
 
@@ -9,7 +9,6 @@ import html
 import json
 import os
 import re
-import sqlite3
 import sys
 import time
 import urllib.parse
@@ -19,11 +18,9 @@ from pathlib import Path
 
 # Paths & Settings
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = Path(os.environ.get(
-    "RATINGS_DB_PATH",
-    "/tmp/ratings_cache.db" if os.environ.get("VERCEL") else BASE_DIR / "ratings_cache.db",
-))
 CONFIG_PATH = BASE_DIR / "config.json"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 HOST = "127.0.0.1"
 PORT = 5000
 
@@ -47,51 +44,60 @@ USER_AGENT = (
 )
 
 
-# --- SQLite Cache Initialization ---
+# --- Supabase Cache ---
+def is_supabase_configured():
+    return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
+
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS ratings (
-            query_title TEXT PRIMARY KEY,
-            title TEXT,
-            imdb_id TEXT,
-            rating TEXT,
-            votes TEXT,
-            year TEXT,
-            genre TEXT,
-            plot TEXT,
-            source TEXT,
-            updated_at INTEGER
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """Ensure the server has Supabase credentials; schema is managed in Supabase."""
+    if not is_supabase_configured():
+        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured")
+
+
+def _supabase_request(method, path, payload=None, prefer=None, range_header=None):
+    if not is_supabase_configured():
+        raise RuntimeError("Supabase is not configured")
+
+    url = f"{SUPABASE_URL}/rest/v1/{path}"
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = urllib.request.Request(url, data=body, method=method)
+    request.add_header("apikey", SUPABASE_SERVICE_ROLE_KEY)
+    request.add_header("Authorization", f"Bearer {SUPABASE_SERVICE_ROLE_KEY}")
+    request.add_header("Accept", "application/json")
+    if body is not None:
+        request.add_header("Content-Type", "application/json")
+    if prefer:
+        request.add_header("Prefer", prefer)
+    if range_header:
+        request.add_header("Range", range_header)
+
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return response.read(), response.headers
 
 
 def get_cached_rating(query_title):
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT title, imdb_id, rating, votes, year, genre, plot, source, updated_at "
-            "FROM ratings WHERE query_title = ?",
-            (query_title.lower().strip(),)
-        )
-        row = cursor.fetchone()
-        conn.close()
-        if row:
+        params = urllib.parse.urlencode({
+            "select": "title,imdb_id,rating,votes,year,genre,plot,source,updated_at",
+            "query_title": f"eq.{query_title.lower().strip()}",
+            "limit": "1",
+        })
+        body, _ = _supabase_request("GET", f"ratings?{params}")
+        rows = json.loads(body.decode("utf-8"))
+        if rows:
+            row = rows[0]
             # Cache valid for 30 days
-            if time.time() - row[8] < 30 * 86400:
+            if time.time() - int(row.get("updated_at") or 0) < 30 * 86400:
                 return {
-                    "title": row[0],
-                    "imdb_id": row[1],
-                    "rating": row[2],
-                    "votes": row[3],
-                    "year": row[4],
-                    "genre": row[5],
-                    "plot": row[6],
-                    "source": row[7],
+                    "title": row.get("title", ""),
+                    "imdb_id": row.get("imdb_id", ""),
+                    "rating": row.get("rating", "N/A"),
+                    "votes": row.get("votes", "N/A"),
+                    "year": row.get("year", "N/A"),
+                    "genre": row.get("genre", ""),
+                    "plot": row.get("plot", ""),
+                    "source": row.get("source", "IMDb"),
                     "cached": True,
                 }
     except Exception as e:
@@ -101,28 +107,44 @@ def get_cached_rating(query_title):
 
 def save_cached_rating(query_title, data):
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR REPLACE INTO ratings 
-            (query_title, title, imdb_id, rating, votes, year, genre, plot, source, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            query_title.lower().strip(),
-            data.get("title", ""),
-            data.get("imdb_id", ""),
-            data.get("rating", "N/A"),
-            data.get("votes", "N/A"),
-            data.get("year", "N/A"),
-            data.get("genre", ""),
-            data.get("plot", ""),
-            data.get("source", "IMDb"),
-            int(time.time()),
-        ))
-        conn.commit()
-        conn.close()
+        payload = {
+            "query_title": query_title.lower().strip(),
+            "title": data.get("title", ""),
+            "imdb_id": data.get("imdb_id", ""),
+            "rating": data.get("rating", "N/A"),
+            "votes": data.get("votes", "N/A"),
+            "year": data.get("year", "N/A"),
+            "genre": data.get("genre", ""),
+            "plot": data.get("plot", ""),
+            "source": data.get("source", "IMDb"),
+            "updated_at": int(time.time()),
+        }
+        path = "ratings?on_conflict=query_title"
+        _supabase_request(
+            "POST",
+            path,
+            payload,
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
     except Exception as e:
         print(f"[Cache Save Error] {e}")
+
+
+def get_cached_rating_count():
+    """Return the number of cache rows, or 0 when Supabase is unavailable."""
+    try:
+        body, headers = _supabase_request(
+            "GET",
+            "ratings?select=query_title",
+            prefer="count=exact",
+            range_header="0-0",
+        )
+        content_range = headers.get("Content-Range", "")
+        total = content_range.rsplit("/", 1)[-1]
+        return int(total) if total.isdigit() else len(json.loads(body.decode("utf-8")))
+    except Exception as e:
+        print(f"[Cache Count Error] {e}")
+        return 0
 
 
 # --- Rating Fetchers ---
@@ -387,22 +409,14 @@ class RatingHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             
-            # Count cached items
-            cached_count = 0
-            try:
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute("SELECT count(*) FROM ratings")
-                cached_count = c.fetchone()[0]
-                conn.close()
-            except Exception:
-                pass
+            cached_count = get_cached_rating_count()
 
             status_payload = {
                 "status": "online",
                 "service": "Netflix IMDb Rating Backend",
                 "cached_titles": cached_count,
-                "omdb_configured": bool(OMDB_API_KEY)
+                "omdb_configured": bool(OMDB_API_KEY),
+                "supabase_configured": is_supabase_configured(),
             }
             self.wfile.write(json.dumps(status_payload).encode())
 
@@ -425,7 +439,7 @@ def run_server():
     print("=" * 60)
     print(f"🚀 Running at: http://{HOST}:{PORT}")
     print(f"📡 Ready to accept requests from Chrome Extension")
-    print(f"📦 Local Cache: {DB_PATH.name}")
+    print(f"📦 Cache: Supabase ({SUPABASE_URL})")
     if OMDB_API_KEY:
         print("🔑 OMDb API Key: Configured")
     else:

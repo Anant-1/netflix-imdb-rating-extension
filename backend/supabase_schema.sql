@@ -1,0 +1,14 @@
+CREATE TABLE IF NOT EXISTS public.ratings (
+    query_title TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    imdb_id TEXT NOT NULL DEFAULT '',
+    rating TEXT NOT NULL DEFAULT 'N/A',
+    votes TEXT NOT NULL DEFAULT 'N/A',
+    year TEXT NOT NULL DEFAULT 'N/A',
+    genre TEXT NOT NULL DEFAULT '',
+    plot TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'IMDb',
+    updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
+);
+
+ALTER TABLE public.ratings ENABLE ROW LEVEL SECURITY;

@@ -14,12 +14,12 @@ document.addEventListener("DOMContentLoaded", () => {
     chrome.runtime.sendMessage({ action: "CHECK_STATUS" }, (res) => {
       if (res && res.online) {
         dot.className = "dot online";
-        statusText.textContent = "Python Backend Connected";
-        statusSubtext.textContent = `Cached titles: ${res.cached_titles || 0} (Port 5000)`;
+        statusText.textContent = "Rating Service Connected";
+        statusSubtext.textContent = `Cached titles: ${res.cached_titles || 0}`;
       } else {
         dot.className = "dot offline";
-        statusText.textContent = "Python Backend Offline";
-        statusSubtext.textContent = "Run: python3 backend/server.py";
+        statusText.textContent = "Rating Service Unavailable";
+        statusSubtext.textContent = "Try again later or check your connection";
       }
     });
   }

@@ -1,7 +1,13 @@
 // Netflix IMDb Rating Extension - Background Service Worker
-// Communicates with local Python server (http://127.0.0.1:5000)
+// Backend origin is supplied by a private backend-config.js file.
 
-const BACKEND_URL = "http://127.0.0.1:5000";
+let BACKEND_URL = "";
+try {
+  importScripts("backend-config.js");
+  BACKEND_URL = (self.NETFLIX_IMDB_BACKEND_URL || "").trim().replace(/\/+$/, "");
+} catch (error) {
+  // The example config is not used automatically; the private config is local or packaged separately.
+}
 const memoryCache = new Map();
 
 // Load cache from chrome.storage on startup
@@ -26,6 +32,9 @@ function persistRating(title, data) {
 // Fetch rating from local Python server
 async function fetchRatingFromPython(title) {
   const normTitle = title.trim().toLowerCase();
+  if (!BACKEND_URL) {
+    return { success: false, error: "Backend URL is not configured", isOffline: true };
+  }
 
   // Check in-memory cache first
   if (memoryCache.has(normTitle)) {
@@ -33,7 +42,7 @@ async function fetchRatingFromPython(title) {
   }
 
   try {
-    const url = `${BACKEND_URL}/rating?title=${encodeURIComponent(title.trim())}`;
+    const url = `${BACKEND_URL}/api/rating?title=${encodeURIComponent(title.trim())}`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
@@ -67,8 +76,9 @@ async function fetchRatingFromPython(title) {
 
 // Check server status
 async function checkBackendStatus() {
+  if (!BACKEND_URL) return { online: false };
   try {
-    const response = await fetch(`${BACKEND_URL}/status`, { cache: "no-store" });
+    const response = await fetch(`${BACKEND_URL}/api/status`, { cache: "no-store" });
     if (response.ok) {
       const data = await response.json();
       return { online: true, ...data };

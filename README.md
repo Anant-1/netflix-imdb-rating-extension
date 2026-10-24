@@ -2,7 +2,7 @@
 
 A Chrome Extension that displays **IMDb ratings, vote counts, release years, and movie summaries** whenever you hover your cursor over any movie or TV show on **Netflix**.
 
-Powered by a lightweight **Python backend** running locally on your machine with built-in SQLite caching.
+Powered by a lightweight **Python backend** using Supabase Postgres for a shared ratings cache.
 
 ---
 
@@ -11,8 +11,8 @@ Powered by a lightweight **Python backend** running locally on your machine with
 - **Hover to View Rating**: Hover your cursor over any movie card or carousel item on Netflix to reveal an instant golden IMDb rating badge.
 - **Rich Hover Tooltip**: Hover over the badge for complete details: Star rating (`★ 8.8/10`), total IMDb votes, release year, genres, plot description, and direct link to the IMDb page.
 - **Netflix Preview Modal Integration**: Seamlessly integrates into Netflix's expanded preview drawer alongside Match %, Maturity Rating, and HD badges.
-- **Zero Python Dependencies**: The Python backend uses standard libraries (`http.server`, `urllib`, `sqlite3`). No need for `pip install` or complex virtual environments!
-- **Instant SQLite Caching**: Ratings are automatically cached locally so repeated hovers load with 0ms delay.
+- **Zero Python Dependencies**: The Python backend uses standard libraries (`http.server`, `urllib`). No need for `pip install` or complex virtual environments!
+- **Supabase Postgres Cache**: Ratings are shared and reused across backend instances.
 - **Interactive Popup**: Test searches, check backend connection status, and clear cache anytime from the Chrome toolbar icon.
 - **Optional OMDb API Support**: Works out of the box with direct IMDb search scraping, with optional support for OMDb API keys if desired.
 
@@ -20,11 +20,13 @@ Powered by a lightweight **Python backend** running locally on your machine with
 
 ## 🚀 Quick Start Guide
 
-### Step 1: Start the Python Backend Server
+### Step 1: Configure Supabase and Start the Python Backend Server
 
-Open your terminal and run:
+Set the Supabase project URL and server-only service-role key in your shell, then run the backend. Do not commit either value.
 
 ```bash
+export SUPABASE_URL="your-supabase-project-url"
+export SUPABASE_SERVICE_ROLE_KEY="your-supabase-service-role-key"
 cd /Users/anant/.gemini/antigravity/scratch/netflix-imdb-rating-extension/backend
 python3 server.py
 ```
@@ -34,9 +36,9 @@ You should see:
 ============================================================
 🎬 Netflix IMDb Rating Backend Server
 ============================================================
-🚀 Running at: http://127.0.0.1:5000
+🚀 Running locally
 📡 Ready to accept requests from Chrome Extension
-📦 Local Cache: ratings_cache.db
+📦 Cache: Supabase Postgres
 🌐 Mode: Direct IMDb Scraping & Suggestion API (Free, no key needed)
 ============================================================
 ```
@@ -49,7 +51,13 @@ You should see:
 
 ---
 
-### Step 2: Load the Extension into Google Chrome
+### Step 2: Configure and Load the Extension
+
+Create a private extension config from the example and set `NETFLIX_IMDB_BACKEND_URL` to your backend origin. `backend-config.js` is ignored by Git so the backend address stays out of the repository.
+
+```bash
+cp extension/backend-config.example.js extension/backend-config.js
+```
 
 1. Open **Google Chrome** and navigate to:
    ```text
@@ -81,7 +89,8 @@ netflix-imdb-rating-extension/
 ├── backend/
 │   ├── server.py             # Python HTTP server (threading, CORS, caching, IMDb lookup)
 │   ├── test_lookup.py        # CLI tester for instant movie rating checks
-│   ├── ratings_cache.db      # SQLite cache database (created automatically)
+│   ├── supabase_schema.sql   # Supabase ratings table and RLS setup
+│   ├── migrate_sqlite_to_supabase.py # One-time import of an existing SQLite cache
 │   └── requirements.txt      # Information & optional dependencies
 │
 ├── extension/
@@ -91,6 +100,7 @@ netflix-imdb-rating-extension/
 │   ├── styles.css            # Styling for badges, tooltip cards, and modal integration
 │   ├── generate_icons.py     # Script that generated the extension icons
 │   ├── icons/                # Extension PNG icons (16, 32, 48, 128)
+│   ├── backend-config.example.js # Template for the ignored backend-config.js
 │   └── popup/
 │       ├── popup.html        # Extension toolbar popup interface
 │       ├── popup.js          # Status checker and test search logic
@@ -122,4 +132,4 @@ python3 server.py
 - **Ratings not appearing immediately**:
   Netflix dynamically loads content as you scroll. A 180ms hover debounce prevents excessive requests during quick mouse sweeps. Keep your cursor on the card for a moment.
 - **Port Conflict**:
-  If port 5000 is used by AirPlay Receiver on macOS (Monterey/Ventura/Sonoma), you can change `PORT = 5000` to `PORT = 5001` in `server.py` and update `BACKEND_URL` in `background.js`.
+  If port 5000 is used by AirPlay Receiver on macOS (Monterey/Ventura/Sonoma), you can change `PORT = 5000` to `PORT = 5001` in `server.py` and update `NETFLIX_IMDB_BACKEND_URL` in your private `extension/backend-config.js`.

@@ -1,10 +1,9 @@
 """Vercel serverless health endpoint."""
 
 import json
-import sqlite3
 from http.server import BaseHTTPRequestHandler
 
-from server import DB_PATH, OMDB_API_KEY, init_db
+from server import OMDB_API_KEY, get_cached_rating_count, init_db, is_supabase_configured
 
 
 class handler(BaseHTTPRequestHandler):
@@ -17,13 +16,13 @@ class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         init_db()
-        with sqlite3.connect(DB_PATH) as conn:
-            cached_count = conn.execute("SELECT count(*) FROM ratings").fetchone()[0]
+        cached_count = get_cached_rating_count()
         payload = {
             "status": "online",
             "service": "Netflix IMDb Rating Backend",
             "cached_titles": cached_count,
             "omdb_configured": bool(OMDB_API_KEY),
+            "supabase_configured": is_supabase_configured(),
         }
         body = json.dumps(payload).encode("utf-8")
         self.send_response(200)
