@@ -66,6 +66,23 @@
   function extractTitleFromElement(el) {
     if (!el) return null;
 
+    // Expanded Netflix title panels expose the title as a heading or logo;
+    // inspect those before artwork and generic accessibility labels.
+    const titleSelectors = [
+      '[data-uia="video-title"]', '[data-uia="previewModal--player-title"]',
+      '.previewModal--player-title', '.video-artwork-title', '.title-title',
+      '.title-info h1', '.title-info h2', '.billboard h1', '.billboard h2',
+      'h1', 'h2', '.fallback-text'
+    ];
+    for (const selector of titleSelectors) {
+      const node = el.matches?.(selector) ? el : el.querySelector(selector);
+      const value = node?.textContent?.trim();
+      if (value && value.length < 120) return cleanTitle(value);
+    }
+
+    const logo = el.querySelector('.title-logo img[alt], .title-logo[alt], img.previewModal--boxart[alt]');
+    if (logo?.alt?.trim()) return cleanTitle(logo.alt);
+
     // 1. Look for image alt text
     const img = el.querySelector("img.boxart-image, img[alt], .previewModal--boxart");
     if (img && img.alt && img.alt.trim().length > 0) {
@@ -254,7 +271,10 @@
     const title = extractTitleFromElement(modal);
     if (!title) return;
 
-    const metaContainer = modal.querySelector(".previewModal--detailsMetadata-left, .videoMetadata--container");
+    const metaContainer = modal.querySelector(
+      ".previewModal--detailsMetadata-left, .videoMetadata--container, " +
+      ".title-info-metadata-wrapper, .title-info, [data-uia*=\"title-info-metadata\"]"
+    );
     if (!metaContainer) return;
 
     const modalBadge = document.createElement("div");
@@ -287,13 +307,35 @@
             </a>
           `;
         } else {
-          modalBadge.style.display = "none";
+          modalBadge.remove();
         }
       }
     );
 
     if (!messageSent) modalBadge.remove();
   }
+
+  function scanNetflixTitlePanels(root = document) {
+    const selectors = [
+      ".previewModal--container", ".previewModal--info", ".title-info",
+      ".billboard", "[role=dialog]", "[data-uia*=title-info]"
+    ];
+    if (root instanceof Element && root.matches(selectors.join(","))) {
+      checkAndEnhancePreviewModal(root);
+    }
+    root.querySelectorAll?.(selectors.join(",")).forEach(checkAndEnhancePreviewModal);
+  }
+
+  // Netflix replaces detail panels in place without navigating.
+  const panelObserver = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (node.nodeType === Node.ELEMENT_NODE) scanNetflixTitlePanels(node);
+      }
+    }
+  });
+  panelObserver.observe(document.documentElement, { childList: true, subtree: true });
+  scanNetflixTitlePanels();
 
   // --- Mouseover / Hover Delegated Listener ---
   document.addEventListener("mouseover", (event) => {
