@@ -10,17 +10,29 @@ try {
 }
 const memoryCache = new Map();
 
-// Load cache from chrome.storage on startup
+function hasNumericRating(item) {
+  const rating = Number(item?.rating);
+  return Number.isFinite(rating) && rating > 0 && rating <= 10;
+}
+
+// Load only usable ratings and discard stale N/A entries from older extension versions.
 chrome.storage.local.get(["cachedRatings"], (result) => {
-  if (result.cachedRatings) {
-    for (const [key, val] of Object.entries(result.cachedRatings)) {
+  const cachedRatings = result.cachedRatings || {};
+  let changed = false;
+  for (const [key, val] of Object.entries(cachedRatings)) {
+    if (hasNumericRating(val)) {
       memoryCache.set(key, val);
+    } else {
+      delete cachedRatings[key];
+      changed = true;
     }
   }
+  if (changed) chrome.storage.local.set({ cachedRatings });
 });
 
-// Save rating to persistent chrome.storage
+// Save only a rating that can be displayed.
 function persistRating(title, data) {
+  if (!hasNumericRating(data)) return;
   memoryCache.set(title.toLowerCase(), data);
   chrome.storage.local.get(["cachedRatings"], (result) => {
     const store = result.cachedRatings || {};
@@ -38,7 +50,11 @@ async function fetchRatingFromPython(title) {
 
   // Check in-memory cache first
   if (memoryCache.has(normTitle)) {
-    return { success: true, data: memoryCache.get(normTitle), fromCache: true };
+    const cached = memoryCache.get(normTitle);
+    if (hasNumericRating(cached)) {
+      return { success: true, data: cached, fromCache: true };
+    }
+    memoryCache.delete(normTitle);
   }
 
   try {
@@ -58,7 +74,7 @@ async function fetchRatingFromPython(title) {
     }
 
     const data = await response.json();
-    if (data.success) {
+    if (data.success && hasNumericRating(data)) {
       persistRating(title, data);
       return { success: true, data: data };
     } else {

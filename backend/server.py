@@ -49,6 +49,15 @@ def is_supabase_configured():
     return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
 
 
+def has_valid_rating(value):
+    """Return whether a rating can be shown as an IMDb score out of ten."""
+    try:
+        rating = float(value)
+        return 0 < rating <= 10
+    except (TypeError, ValueError):
+        return False
+
+
 def init_db():
     """Ensure the server has Supabase credentials; schema is managed in Supabase."""
     if not is_supabase_configured():
@@ -87,6 +96,10 @@ def get_cached_rating(query_title):
         rows = json.loads(body.decode("utf-8"))
         if rows:
             row = rows[0]
+            # Older lookups may have cached an OMDb match without an IMDb score.
+            # Treat those rows as misses so a fresh IMDb lookup can replace them.
+            if not has_valid_rating(row.get("rating")):
+                return None
             # Cache valid for 30 days
             if time.time() - int(row.get("updated_at") or 0) < 30 * 86400:
                 return {
@@ -160,10 +173,13 @@ def fetch_from_omdb(title, api_key):
         with urllib.request.urlopen(req, timeout=5) as response:
             res_data = json.loads(response.read().decode("utf-8"))
             if res_data.get("Response") == "True":
+                rating = res_data.get("imdbRating", "N/A")
+                if not has_valid_rating(rating):
+                    return None
                 return {
                     "title": res_data.get("Title", title),
                     "imdb_id": res_data.get("imdbID", ""),
-                    "rating": res_data.get("imdbRating", "N/A"),
+                    "rating": rating,
                     "votes": res_data.get("imdbVotes", "N/A"),
                     "year": res_data.get("Year", "N/A"),
                     "genre": res_data.get("Genre", "N/A"),
@@ -293,7 +309,7 @@ def fetch_from_imdb_direct(title):
     except Exception as e:
         print(f"[IMDb direct HTML fallback error for '{imdb_id}']: {e}")
 
-    if imdb_id:
+    if imdb_id and has_valid_rating(rating):
         return {
             "title": suggested_title,
             "imdb_id": imdb_id,
@@ -342,6 +358,9 @@ def lookup_movie(title):
     if not result:
         print('using imdb')
         result = fetch_from_imdb_direct(cleaned)
+
+    if result and not has_valid_rating(result.get("rating")):
+        result = None
 
     # Cache if found
     if result:

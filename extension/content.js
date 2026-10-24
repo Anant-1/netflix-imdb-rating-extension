@@ -18,6 +18,11 @@
     return /extension context invalidated/i.test(error?.message || String(error));
   }
 
+  function hasNumericRating(item) {
+    const rating = Number(item?.rating);
+    return Number.isFinite(rating) && rating > 0 && rating <= 10;
+  }
+
   // A Netflix tab can outlive an extension reload. In that case Chrome invalidates
   // the old content script context and sendMessage throws instead of reaching the worker.
   function sendExtensionMessage(message, callback) {
@@ -129,7 +134,7 @@
 
         if (response && response.success && response.data) {
           const item = response.data;
-          const isRated = item.rating && item.rating !== "N/A";
+          const isRated = hasNumericRating(item);
           const scoreText = isRated ? `★ ${item.rating}` : "Unrated";
           badge.innerHTML = `
             <span class="imdb-icon">IMDb</span>
@@ -173,7 +178,7 @@
   function showTooltip(badge, event) {
     const tooltip = getOrCreateTooltip();
     const data = badge.dataset;
-    if (!data.title) return;
+    if (!data.title || !hasNumericRating(data)) return;
 
     const imdbUrl = data.imdbId ? `https://www.imdb.com/title/${data.imdbId}/` : `https://www.imdb.com/find?q=${encodeURIComponent(data.title)}`;
 
@@ -269,7 +274,7 @@
           return;
         }
 
-        if (response && response.success && response.data) {
+        if (response && response.success && response.data && hasNumericRating(response.data)) {
           const item = response.data;
           const url = item.imdb_id
             ? `https://www.imdb.com/title/${item.imdb_id}/`
